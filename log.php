@@ -1,7 +1,5 @@
 <?php
 require_once 'config.php';
-require_once 'lib/utils.php';
-require_once 'lib/database.php';
 
 header('Content-Type: application/json');
 
