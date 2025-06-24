@@ -1,14 +1,13 @@
-FROM php:8.1-apache
+FROM php:8.2-apache
 
+# Enable apache mod_rewrite
 RUN a2enmod rewrite
 
+# Copy all project files into /var/www/html
 COPY . /var/www/html/
 
-WORKDIR /var/www/html/
+# Set working directory
+WORKDIR /var/www/html
 
-RUN chown -R www-data:www-data /var/www/html \
- && chmod -R 755 /var/www/html
-
+# Expose the default Apache port
 EXPOSE 80
-
-CMD ["apache2-foreground"]
